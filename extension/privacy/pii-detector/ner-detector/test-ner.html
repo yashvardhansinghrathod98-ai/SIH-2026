@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Rampart NER Diagnostic Test</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; max-width: 800px; margin: 0 auto; line-height: 1.5; background: #0f172a; color: #f8fafc; }
+    h1 { font-size: 20px; color: #38bdf8; margin-bottom: 8px; }
+    .badge { background: #0369a1; color: #e0f2fe; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+    .status { padding: 12px 16px; border-radius: 6px; margin: 16px 0; font-size: 13px; font-weight: 500; background: #1e293b; border: 1px solid #334155; }
+    .status.success { border-color: #22c55e; color: #86efac; }
+    .status.info { border-color: #38bdf8; color: #7dd3fc; }
+    .status.error { border-color: #ef4444; color: #fca5a5; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .card h3 { margin-top: 0; font-size: 14px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+    pre { background: #090d16; padding: 12px; border-radius: 6px; font-size: 12px; color: #38bdf8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 250px; }
+    .meta-tag { display: inline-block; background: #334155; color: #f1f5f9; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Rampart PII NER Diagnostic Test <span class="badge">Milestone 3A - Chunk 1</span></h1>
+  <p style="color: #94a3b8; font-size: 13px;">Isolated on-device test for <code>nationaldesignstudio/rampart</code> token-classification using Transformers.js.</p>
+
+  <div id="status-box" class="status info">Initializing test...</div>
+
+  <div class="card">
+    <h3>Diagnostic Metadata</h3>
+    <div>
+      <span class="meta-tag">Model: <b id="meta-model">nationaldesignstudio/rampart</b></span>
+      <span class="meta-tag">Variant: <b id="meta-dtype">q4</b></span>
+      <span class="meta-tag">Provider: <b id="meta-provider">Checking...</b></span>
+      <span class="meta-tag">WebGPU Support: <b id="meta-webgpu">Checking...</b></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Test 1: PII Input Inference</h3>
+    <p style="font-size: 12px; color: #94a3b8; margin-bottom: 6px;">Input: "My name is John Smith. My email is john.smith@example.com. I live at 123 Main Street. My phone number is 9876543210."</p>
+    <div>
+      <span class="meta-tag">Latency: <b id="test1-latency">-</b></span>
+      <span class="meta-tag">Entities Detected: <b id="test1-count">-</b></span>
+    </div>
+    <pre id="test1-output">// Running Test 1...</pre>
+  </div>
+
+  <div class="card">
+    <h3>Test 2: Safe Text Inference</h3>
+    <p style="font-size: 12px; color: #94a3b8; margin-bottom: 6px;">Input: "The quick brown fox jumps over the lazy dog. Today is a sunny day with clear skies."</p>
+    <div>
+      <span class="meta-tag">Latency: <b id="test2-latency">-</b></span>
+      <span class="meta-tag">Entities Detected: <b id="test2-count">-</b></span>
+    </div>
+    <pre id="test2-output">// Running Test 2...</pre>
+  </div>
+
+  <script src="../../../lib/transformers.bundle.js"></script>
+  <script src="../pii-types.js"></script>
+  <script src="model-loader.js"></script>
+  <script src="rampart-adapter.js"></script>
+  <script src="rampart-detector.js"></script>
+  <script>
+    (async function runBrowserTest() {
+      const statusBox = document.getElementById("status-box");
+      const metaProvider = document.getElementById("meta-provider");
+      const metaWebgpu = document.getElementById("meta-webgpu");
+      const test1Latency = document.getElementById("test1-latency");
+      const test1Count = document.getElementById("test1-count");
+      const test1Output = document.getElementById("test1-output");
+      const test2Latency = document.getElementById("test2-latency");
+      const test2Count = document.getElementById("test2-count");
+      const test2Output = document.getElementById("test2-output");
+
+      try {
+        const hasWebGPU = ModelLoader.isWebGPUSupported();
+        metaWebgpu.textContent = hasWebGPU ? "YES (Available)" : "NO (Fallback to WASM)";
+        metaWebgpu.style.color = hasWebGPU ? "#86efac" : "#fca5a5";
+
+        statusBox.textContent = "Loading nationaldesignstudio/rampart model via Transformers.js...";
+
+        const t0 = performance.now();
+        await ModelLoader.getPipeline();
+        const loadDuration = Math.round(performance.now() - t0);
+
+        const provider = ModelLoader.getExecutionProvider();
+        metaProvider.textContent = provider;
+        metaProvider.style.color = provider === "WebGPU" ? "#86efac" : "#fde047";
+
+        statusBox.className = "status success";
+        statusBox.textContent = `Model loaded successfully in ${loadDuration} ms using ${provider}! Running inference tests...`;
+
+        // Test 1: PII Input
+        const piiInput = "My name is John Smith.\nMy email is john.smith@example.com.\nI live at 123 Main Street.\nMy phone number is 9876543210.";
+        const t1Start = performance.now();
+        const piiResults = await RampartDetector.detect(piiInput);
+        const t1Duration = Math.round((performance.now() - t1Start) * 100) / 100;
+
+        test1Latency.textContent = `${t1Duration} ms`;
+        test1Count.textContent = piiResults.length;
+        test1Output.textContent = JSON.stringify(piiResults, null, 2);
+
+        // Test 2: Safe Text
+        const safeInput = "The quick brown fox jumps over the lazy dog. Today is a sunny day with clear skies.";
+        const t2Start = performance.now();
+        const safeResults = await RampartDetector.detect(safeInput);
+        const t2Duration = Math.round((performance.now() - t2Start) * 100) / 100;
+
+        test2Latency.textContent = `${t2Duration} ms`;
+        test2Count.textContent = safeResults.length;
+        test2Output.textContent = JSON.stringify(safeResults, null, 2);
+
+        statusBox.textContent = `All tests completed successfully! Provider: ${provider} | Test 1: ${t1Duration} ms (${piiResults.length} entities) | Test 2: ${t2Duration} ms (${safeResults.length} entities)`;
+        console.log("=== BROWSER DIAGNOSTIC TEST FINISHED ===");
+        console.log("Provider:", provider);
+        console.log("Test 1 (PII):", piiResults);
+        console.log("Test 2 (Safe):", safeResults);
+      } catch (err) {
+        console.error("[Test Error]", err);
+        statusBox.className = "status error";
+        statusBox.textContent = "Test failed: " + (err?.message || String(err));
+      }
+    })();
+  </script>
+</body>
+</html>

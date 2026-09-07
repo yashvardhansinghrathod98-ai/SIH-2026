@@ -88,6 +88,36 @@
       </div>
     </div>
 
+    <!-- Section 4: Rampart PII Detections -->
+    <div id="rampart-pii-debug-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>RAMPART NER PII (<span id="rampart-pii-count">0</span> detected)</span>
+      </div>
+      <div class="json-container">
+        <pre id="rampart-pii-json-output">// Rampart NER Output</pre>
+      </div>
+    </div>
+
+    <!-- Section 5: Unified Pipeline All Raw Detections -->
+    <div id="all-raw-debug-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>ALL RAW DETECTIONS (<span id="all-raw-count">0</span> total)</span>
+      </div>
+      <div class="json-container">
+        <pre id="all-raw-json-output">// All Raw Detections Output</pre>
+      </div>
+    </div>
+
+    <!-- Section 6: Unified Pipeline Canonical Fused Detections -->
+    <div id="fused-debug-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>CANONICAL FUSED DETECTIONS (<span id="fused-count">0</span> total, <span id="merged-count">0</span> merged groups)</span>
+      </div>
+      <div class="json-container">
+        <pre id="fused-json-output">// Canonical Fused Detections Output</pre>
+      </div>
+    </div>
+
     <div class="json-header">
       <span id="output-title">PageState / OCR Output JSON</span>
     </div>
@@ -97,12 +127,22 @@
   </div>
 
   <script src="../lib/tesseract.min.js"></script>
+  <script src="../lib/transformers.bundle.js"></script>
   <script src="../perception/canvas-processor.js"></script>
   <script src="../perception/ocr-engine.js"></script>
   <script src="../privacy/pii-detector/pii-types.js"></script>
   <script src="../privacy/pii-detector/text-detector.js"></script>
   <script src="../privacy/pii-detector/dom-detector.js"></script>
   <script src="../privacy/pii-detector/dom-text-extractor.js"></script>
+  <script src="../privacy/pii-detector/ner-detector/model-loader.js"></script>
+  <script src="../privacy/pii-detector/ner-detector/rampart-adapter.js"></script>
+  <script src="../privacy/pii-detector/ner-detector/rampart-detector.js"></script>
+  <script src="../privacy/pii-detector/spatial-mapper/span-to-bbox.js"></script>
+  <script src="../privacy/ocr-quality/ocr-quality-filter.js"></script>
+  <script src="../privacy/ocr-quality/ocr-line-builder.js"></script>
+  <script src="../privacy/context-analysis/context-analyzer.js"></script>
+  <script src="../privacy/confidence-fusion/fusion-engine.js"></script>
+  <script src="../privacy/privacy-pipeline.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

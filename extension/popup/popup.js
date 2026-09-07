@@ -32,6 +32,19 @@ document.addEventListener("DOMContentLoaded", () => {
   const ocrPiiCount = document.getElementById("ocr-pii-count");
   const ocrPiiJsonOutput = document.getElementById("ocr-pii-json-output");
 
+  const rampartPiiDebugContainer = document.getElementById("rampart-pii-debug-container");
+  const rampartPiiCount = document.getElementById("rampart-pii-count");
+  const rampartPiiJsonOutput = document.getElementById("rampart-pii-json-output");
+
+  const allRawDebugContainer = document.getElementById("all-raw-debug-container");
+  const allRawCount = document.getElementById("all-raw-count");
+  const allRawJsonOutput = document.getElementById("all-raw-json-output");
+
+  const fusedDebugContainer = document.getElementById("fused-debug-container");
+  const fusedCount = document.getElementById("fused-count");
+  const mergedCount = document.getElementById("merged-count");
+  const fusedJsonOutput = document.getElementById("fused-json-output");
+
   const dbgWidth = document.getElementById("dbg-width");
   const dbgHeight = document.getElementById("dbg-height");
   const dbgHasData = document.getElementById("dbg-hasdata");
@@ -39,43 +52,125 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let currentJsonData = null;
 
+  // Observation state: POPUP collects observations, PIPELINE performs detections
+  const currentObservations = {
+    pageState: null,
+    domTextRegions: null,
+    ocrResults: null
+  };
+
+  /**
+   * Executes the central PrivacyPipeline across all available observations
+   * and renders the unified results across the presentation containers.
+   */
+  async function runPrivacyPipelineAndRender() {
+    if (typeof PrivacyPipeline === "undefined") {
+      console.warn("[Popup] PrivacyPipeline is not loaded.");
+      return null;
+    }
+
+    showStatus("Running PrivacyPipeline across all observation branches...", "info");
+
+    const metadata = {
+      ...(currentObservations.pageState?.metadata || {}),
+      canvas: canvasPreview && canvasPreview.width > 0 ? {
+        width: canvasPreview.width,
+        height: canvasPreview.height
+      } : null
+    };
+
+    const result = await PrivacyPipeline.execute({
+      pageState: currentObservations.pageState,
+      domTextRegions: currentObservations.domTextRegions,
+      ocrResults: currentObservations.ocrResults,
+      metadata: metadata
+    });
+
+    console.log("=== PRIVACY PIPELINE RESULT ===", result);
+    renderPipelineResults(result);
+    return result;
+  }
+
+  function renderPipelineResults(result) {
+    if (!result) return;
+
+    // 1. Structural DOM PII
+    renderPIIDebug(result.bySource.DOM || []);
+
+    // 2. DOM Visible Text PII
+    renderDOMTextDebug({
+      textRegions: currentObservations.domTextRegions || [],
+      detections: result.bySource.DOM_TEXT || []
+    });
+
+    // 3. OCR PII Detections
+    renderOCRPIIDebug(
+      (currentObservations.ocrResults || []).length,
+      result.bySource.OCR || []
+    );
+
+    // 4. Rampart NER PII
+    const rampartDetections = result.bySource.RAMPART || [];
+    if (rampartPiiCount) rampartPiiCount.textContent = rampartDetections.length;
+    if (rampartPiiJsonOutput) rampartPiiJsonOutput.textContent = JSON.stringify(rampartDetections, null, 2);
+    if (rampartPiiDebugContainer) rampartPiiDebugContainer.classList.remove("hidden");
+
+    // 5. ALL RAW DETECTIONS (Hidden: privacy pipeline output shows only fused results)
+    if (allRawDebugContainer) allRawDebugContainer.classList.add("hidden");
+
+    // 6. CANONICAL FUSED DETECTIONS
+    const fusedDetections = result.fusedDetections || [];
+    if (fusedCount) fusedCount.textContent = fusedDetections.length;
+    if (mergedCount) mergedCount.textContent = result.trace?.mergedGroupCount ?? 0;
+    if (fusedJsonOutput) fusedJsonOutput.textContent = JSON.stringify(fusedDetections, null, 2);
+    if (fusedDebugContainer) fusedDebugContainer.classList.remove("hidden");
+
+    // Main JSON Output Window: Show ONLY fused results
+    currentJsonData = fusedDetections;
+    if (outputTitle) {
+      outputTitle.textContent = `Privacy Pipeline Output (${fusedDetections.length} Fused Canonical Detections)`;
+    }
+    if (jsonOutput) {
+      jsonOutput.textContent = JSON.stringify(fusedDetections, null, 2);
+    }
+    if (copyBtn) copyBtn.disabled = false;
+  }
+
   if (inspectBtn) {
     inspectBtn.addEventListener("click", async () => {
       showStatus("Analyzing webpage DOM & page text...", "info");
       inspectBtn.disabled = true;
 
+      // 1. Independent DOM Observation Capture
       try {
         const response = await chrome.runtime.sendMessage({ action: "INSPECT_PAGE" });
 
         if (response && response.status === "success" && response.pageState) {
-          currentJsonData = response.pageState;
-          renderPageState(currentJsonData);
-
-          // 1. STRUCTURAL DOM PII (From Form Inputs)
-          if (typeof DOMDetector !== "undefined") {
-            const structuralDetections = DOMDetector.detect(response.pageState);
-            console.log("=== STRUCTURAL DOM PII ===", structuralDetections);
-            renderPIIDebug(structuralDetections);
-          }
-
-          // 2. PAGE TEXT PII & DOM TEXT REGIONS (From Whole-Page Text Extraction)
-          if (response.domTextData) {
-            console.log("=== DOM TEXT REGIONS ===", response.domTextData.textRegions);
-            console.log("=== PAGE TEXT PII DETECTIONS ===", response.domTextData.detections);
-            renderDOMTextDebug(response.domTextData);
-            showStatus(`DOM analysis complete! ${response.domTextData.textRegions.length} text regions, ${response.domTextData.detections.length} page text PII.`, "info");
-          } else {
-            showStatus("DOM analysis complete!", "info");
-          }
-
-          if (copyBtn) copyBtn.disabled = false;
+          currentObservations.pageState = response.pageState;
+          currentObservations.domTextRegions = response.domTextData?.textRegions || [];
+          renderPageState(response.pageState);
         } else {
           const errorMsg = response?.message || "Failed to inspect page.";
-          showStatus(errorMsg, "error");
+          showStatus("DOM Error: " + errorMsg, "error");
+          inspectBtn.disabled = false;
+          return;
         }
-      } catch (err) {
-        console.error("[Popup Error]", err);
-        showStatus("Error: " + (err?.message || String(err)), "error");
+      } catch (domErr) {
+        console.error("[DOM Inspection Error]", domErr);
+        showStatus("DOM Error: " + (domErr?.message || String(domErr)), "error");
+        inspectBtn.disabled = false;
+        return;
+      }
+
+      // 2. Centralized PII detection owned by PrivacyPipeline (independent error boundary)
+      try {
+        const result = await runPrivacyPipelineAndRender();
+        if (result) {
+          showStatus(`DOM analysis complete! ${result.fusedDetections.length} fused PII detections found.`, "info");
+        }
+      } catch (pipelineErr) {
+        console.error("[Pipeline Error after DOM]", pipelineErr);
+        showStatus("Pipeline Notice: " + (pipelineErr?.message || String(pipelineErr)), "error");
       } finally {
         inspectBtn.disabled = false;
       }
@@ -94,16 +189,20 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         if (response && response.status === "success" && response.dataUrl) {
-          showStatus("Rendering image into Canvas...", "info");
-          const { width, height } = await CanvasProcessor.loadToCanvas(response.dataUrl, canvasPreview);
+          showStatus("Rendering image into Canvas (2x resolution upscaled)...", "info");
+          const { width, height, scale, originalWidth, originalHeight } = await CanvasProcessor.loadToCanvas(
+            response.dataUrl,
+            canvasPreview,
+            { scale: 2.0 }
+          );
 
           const stats = CanvasProcessor.inspectCanvas(canvasPreview);
           renderCanvasDebug(stats);
 
-          if (canvasDim) canvasDim.textContent = `${width} × ${height} px`;
+          if (canvasDim) canvasDim.textContent = `${width} × ${height} px (${scale}x upscaled from ${originalWidth}×${originalHeight})`;
           if (canvasContainer) canvasContainer.classList.remove("hidden");
           if (ocrBtn) ocrBtn.disabled = false;
-          showStatus(`Canvas ready! ${stats.nonZeroPercent}% non-zero pixels. Click 'Run Local OCR'.`, "info");
+          showStatus(`Canvas ready! ${stats.nonZeroPercent}% non-zero pixels (${scale}x upscaled). Click 'Run Local OCR'.`, "info");
         } else {
           const errorMsg = response?.message || "Failed to capture screenshot.";
           showStatus(errorMsg, "error");
@@ -135,47 +234,35 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus(`Initializing Tesseract.js OCR engine (${stats.width}x${stats.height} px, ${stats.nonZeroPercent}% content)...`, "info");
       ocrBtn.disabled = true;
 
+      // 1. Independent Visual Observation: Tesseract OCR execution
+      let ocrResults = null;
       try {
-        const ocrResults = await OCREngine.recognize(canvasPreview, (progress) => {
+        ocrResults = await OCREngine.recognize(canvasPreview, (progress) => {
           const pct = Math.round(progress * 100);
           showStatus(`Running OCR: ${pct}% complete...`, "info");
         });
 
-        // Pass each OCR text region through existing TextDetector
-        const ocrPiiDetections = [];
-        for (const region of ocrResults) {
-          if (typeof TextDetector !== "undefined") {
-            const detections = TextDetector.detect(region.text, {
-              source: typeof PIISource !== "undefined" ? PIISource.OCR : "OCR",
-              elementId: null,
-              bbox: region.bbox
-            });
-            ocrPiiDetections.push(...detections);
-          }
-        }
-
-        // Temporary DEBUG output
-        console.log(`OCR RESULTS: ${ocrResults.length}`);
-        console.log(`OCR PII DETECTIONS: ${ocrPiiDetections.length}`);
-        console.log("=== OCR PII DETECTIONS ===", ocrPiiDetections);
-
-        renderOCRPIIDebug(ocrResults.length, ocrPiiDetections);
-
-        currentJsonData = {
-          debugSummary: `OCR RESULTS: ${ocrResults.length} | OCR PII DETECTIONS: ${ocrPiiDetections.length}`,
-          ocrResultsCount: ocrResults.length,
-          ocrPiiDetectionsCount: ocrPiiDetections.length,
-          ocrPiiDetections: ocrPiiDetections,
-          ocrResults: ocrResults
-        };
-        if (outputTitle) outputTitle.textContent = `OCR Results & PII (OCR RESULTS: ${ocrResults.length}, OCR PII DETECTIONS: ${ocrPiiDetections.length})`;
-        if (jsonOutput) jsonOutput.textContent = JSON.stringify(currentJsonData, null, 2);
-        if (copyBtn) copyBtn.disabled = false;
-        showStatus(`OCR complete! OCR RESULTS: ${ocrResults.length}, OCR PII DETECTIONS: ${ocrPiiDetections.length}.`, "info");
-      } catch (err) {
-        console.error("[OCR Error Raw]", err);
-        const displayErr = err?.message || (typeof err === "object" ? JSON.stringify(err) : String(err));
+        // Store raw OCR observations
+        currentObservations.ocrResults = ocrResults;
+        showStatus(`OCR recognition complete (${ocrResults.length} words recognized). Running PrivacyPipeline...`, "info");
+      } catch (ocrErr) {
+        console.error("[OCR Error Raw]", ocrErr);
+        const displayErr = ocrErr?.message || (typeof ocrErr === "object" ? JSON.stringify(ocrErr) : String(ocrErr));
         showStatus("OCR Error: " + displayErr, "error");
+        ocrBtn.disabled = false;
+        return;
+      }
+
+      // 2. Centralized PII detection owned by PrivacyPipeline (independent error boundary)
+      try {
+        const result = await runPrivacyPipelineAndRender();
+        if (result) {
+          showStatus(`OCR & Pipeline complete! Words: ${ocrResults.length} | Fused PII: ${result.fusedDetections.length}.`, "info");
+        }
+      } catch (pipelineErr) {
+        console.error("[Pipeline Error after OCR]", pipelineErr);
+        const displayErr = pipelineErr?.message || (typeof pipelineErr === "object" ? JSON.stringify(pipelineErr) : String(pipelineErr));
+        showStatus("Pipeline Notice: " + displayErr, "error");
       } finally {
         ocrBtn.disabled = false;
       }

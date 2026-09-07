@@ -71,6 +71,38 @@ class DOMTextExtractor {
           rect.left < window.innerWidth
         );
 
+        // Extract serializable word-level geometry directly in content script
+        const domWords = [];
+        const nodeStr = textNode.nodeValue;
+        const wordRegex = /\S+/g;
+        let match;
+        const wordRange = document.createRange();
+
+        while ((match = wordRegex.exec(nodeStr)) !== null) {
+          const wordText = match[0];
+          const wordStart = match.index;
+          const wordEnd = match.index + wordText.length;
+
+          try {
+            wordRange.setStart(textNode, wordStart);
+            wordRange.setEnd(textNode, wordEnd);
+            const wRect = wordRange.getBoundingClientRect();
+            if (wRect && wRect.width > 0 && wRect.height > 0) {
+              domWords.push({
+                text: wordText,
+                bbox: {
+                  x: Math.round(wRect.left),
+                  y: Math.round(wRect.top),
+                  width: Math.round(wRect.width),
+                  height: Math.round(wRect.height)
+                }
+              });
+            }
+          } catch (we) {
+            // Ignore individual word measurement errors
+          }
+        }
+
         textRegions.push({
           text: rawText,
           bbox: {
@@ -79,6 +111,7 @@ class DOMTextExtractor {
             width: Math.round(rect.width),
             height: Math.round(rect.height)
           },
+          domWords: domWords,
           visible: true,
           inViewport: inViewport
         });
@@ -107,27 +140,14 @@ class DOMTextExtractor {
   }
 
   /**
-   * Runs whole-page DOM text node extraction and passes text regions through TextDetector.
+   * Runs whole-page DOM text extraction. Detection is owned by PrivacyPipeline.
    * @returns {{ textRegions: Array, detections: Array }}
    */
   static extractAndDetect() {
     const textRegions = DOMTextExtractor.extractVisibleTextRegions();
-    const pageTextDetections = [];
-
-    for (const region of textRegions) {
-      if (typeof TextDetector !== "undefined") {
-        const detections = TextDetector.detect(region.text, {
-          source: typeof PIISource !== "undefined" ? PIISource.DOM_TEXT : "DOM_TEXT",
-          elementId: null,
-          bbox: region.bbox
-        });
-        pageTextDetections.push(...detections);
-      }
-    }
-
     return {
       textRegions: textRegions,
-      detections: pageTextDetections
+      detections: []
     };
   }
 }

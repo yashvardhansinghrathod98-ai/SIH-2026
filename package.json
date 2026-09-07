@@ -1,0 +1,24 @@
+{
+  "name": "sih-2026",
+  "version": "1.0.0",
+  "description": "On-device visual perception and privacy-preserving browser extension built for **SIH Problem Statement SIH26171**.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yashvardhansinghrathod98-ai/SIH-2026.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/yashvardhansinghrathod98-ai/SIH-2026/issues"
+  },
+  "homepage": "https://github.com/yashvardhansinghrathod98-ai/SIH-2026#readme",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  }
+}

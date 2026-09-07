@@ -3,31 +3,44 @@
 
 class CanvasProcessor {
   /**
-   * Loads a Data URL or Image Source into an HTMLCanvasElement while preserving dimensions/aspect ratio.
+   * Loads a Data URL or Image Source into an HTMLCanvasElement while preserving dimensions/aspect ratio,
+   * optionally applying resolution upscaling (default: 2.0x) for enhanced OCR text recognition.
    * @param {string|HTMLImageElement} imageInput - Data URL string or Image element
    * @param {HTMLCanvasElement} [existingCanvas] - Optional existing canvas to render into
-   * @returns {Promise<{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, width: number, height: number }>}
+   * @param {Object|number} [options={}] - Options object { scale: number } or scale number directly
+   * @returns {Promise<{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, width: number, height: number, scale: number, originalWidth: number, originalHeight: number }>}
    */
-  static async loadToCanvas(imageInput, existingCanvas = null) {
+  static async loadToCanvas(imageInput, existingCanvas = null, options = {}) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         const canvas = existingCanvas || document.createElement("canvas");
-        const width = img.naturalWidth || img.width;
-        const height = img.naturalHeight || img.height;
+        const origWidth = img.naturalWidth || img.width;
+        const origHeight = img.naturalHeight || img.height;
 
-        canvas.width = width;
-        canvas.height = height;
+        const rawScale = (typeof options === "number") ? options : (options?.scale !== undefined ? options.scale : 2.0);
+        const scale = (typeof rawScale === "number" && rawScale > 0) ? rawScale : 2.0;
+
+        const targetWidth = Math.round(origWidth * scale);
+        const targetHeight = Math.round(origHeight * scale);
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
 
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.clearRect(0, 0, targetWidth, targetHeight);
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
         resolve({
           canvas: canvas,
           ctx: ctx,
-          width: width,
-          height: height
+          width: targetWidth,
+          height: targetHeight,
+          scale: scale,
+          originalWidth: origWidth,
+          originalHeight: origHeight
         });
       };
       img.onerror = (err) => reject(new Error("Failed to load image into Canvas: " + err));
@@ -40,6 +53,27 @@ class CanvasProcessor {
         reject(new Error("Invalid image input type for CanvasProcessor."));
       }
     });
+  }
+
+  /**
+   * Upscales an existing HTMLCanvasElement by a given scale factor with high-quality smoothing.
+   * @param {HTMLCanvasElement} sourceCanvas
+   * @param {number} [scale=2.0]
+   * @returns {HTMLCanvasElement}
+   */
+  static upscaleCanvas(sourceCanvas, scale = 2.0) {
+    if (!sourceCanvas || sourceCanvas.width === 0 || sourceCanvas.height === 0) {
+      return sourceCanvas;
+    }
+    const targetCanvas = document.createElement("canvas");
+    targetCanvas.width = Math.round(sourceCanvas.width * scale);
+    targetCanvas.height = Math.round(sourceCanvas.height * scale);
+
+    const ctx = targetCanvas.getContext("2d", { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+    return targetCanvas;
   }
 
   /**
