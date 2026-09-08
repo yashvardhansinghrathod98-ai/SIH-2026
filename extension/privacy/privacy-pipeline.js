@@ -51,6 +51,27 @@ if (typeof require !== "undefined") {
       global.FusionEngine = fusion.FusionEngine || fusion;
     }
   }
+  if (typeof global.TextRedactor === "undefined") {
+    const redactorPath = path.join(__dirname, "redaction/text-redactor.js");
+    if (fs.existsSync(redactorPath)) {
+      const redactor = require(redactorPath);
+      global.TextRedactor = redactor.TextRedactor || redactor;
+    }
+  }
+  if (typeof global.ScreenshotRedactor === "undefined") {
+    const redactorPath = path.join(__dirname, "redaction/screenshot-redactor.js");
+    if (fs.existsSync(redactorPath)) {
+      const redactor = require(redactorPath);
+      global.ScreenshotRedactor = redactor.ScreenshotRedactor || redactor;
+    }
+  }
+  if (typeof global.PrivacyGate === "undefined") {
+    const gatePath = path.join(__dirname, "privacy-gate/privacy-gate.js");
+    if (fs.existsSync(gatePath)) {
+      const gate = require(gatePath);
+      global.PrivacyGate = gate.PrivacyGate || gate;
+    }
+  }
 }
 
 class PrivacyPipeline {
@@ -92,13 +113,21 @@ class PrivacyPipeline {
     }
     const source = (typeof PIISource !== "undefined" && PIISource.DOM_TEXT) ? PIISource.DOM_TEXT : "DOM_TEXT";
     const detections = [];
-    for (const region of textRegions) {
+    for (let rIdx = 0; rIdx < textRegions.length; rIdx++) {
+      const region = textRegions[rIdx];
       if (!region || !region.text) continue;
+      const regIndex = typeof region.regionIndex === "number" ? region.regionIndex : rIdx;
       const matched = detector.detect(region.text, {
         source: source,
         elementId: region.elementId || null,
         bbox: region.bbox || null
       });
+      for (const m of matched) {
+        m.regionIndex = regIndex;
+        if (m.reason) {
+          m.reason = `${m.reason}:reg${regIndex}`;
+        }
+      }
       detections.push(...matched);
     }
     console.log(`[PrivacyPipeline] Branch 2 (DOM Text + Regex): ${detections.length} detections`);
@@ -218,9 +247,11 @@ class PrivacyPipeline {
     }
 
     const detections = [];
-    for (const region of domTextRegions) {
+    for (let rIdx = 0; rIdx < domTextRegions.length; rIdx++) {
+      const region = domTextRegions[rIdx];
       const text = region?.text;
       if (!text || typeof text !== "string") continue;
+      const regIndex = typeof region.regionIndex === "number" ? region.regionIndex : rIdx;
 
       try {
         const rawEntities = await rampart.detect(text);
@@ -228,7 +259,9 @@ class PrivacyPipeline {
           const detection = {
             ...entity,
             source: (typeof PIISource !== "undefined" && PIISource.RAMPART) ? PIISource.RAMPART : "RAMPART",
-            contextSource: "DOM"
+            contextSource: "DOM",
+            regionIndex: regIndex,
+            reason: entity.reason ? `${entity.reason}:reg${regIndex}` : `rampart-dom:reg${regIndex}`
           };
 
           if (mapper) {
@@ -237,7 +270,12 @@ class PrivacyPipeline {
               textNode: region.textNode || null,
               sourceText: text
             };
-            detections.push(mapper.groundDetection(detection, spatialContext));
+            const grounded = mapper.groundDetection(detection, spatialContext);
+            grounded.regionIndex = regIndex;
+            if (grounded.reason && !grounded.reason.includes(`:reg${regIndex}`)) {
+              grounded.reason = `${grounded.reason}:reg${regIndex}`;
+            }
+            detections.push(grounded);
           } else {
             detections.push(detection);
           }
@@ -500,10 +538,126 @@ class PrivacyPipeline {
       console.warn("[PrivacyPipeline] FusionEngine unavailable, keeping filtered detections as fused.");
     }
 
+    // REDACTION LAYER: Text Redactor (Sanitized DOM Text) + Screenshot Redactor (Sanitized Screenshot)
+    let sanitizedDomText = "";
+    let textRedactionTrace = { totalRedactions: 0 };
+    let textRedactionResult = null;
+    const textRedactor = (typeof TextRedactor !== "undefined")
+      ? TextRedactor
+      : (typeof self !== "undefined" && self.TextRedactor
+          ? self.TextRedactor
+          : (typeof global !== "undefined" && global.TextRedactor ? global.TextRedactor : null));
+
+    if (textRedactor && typeof textRedactor.redactDomText === "function") {
+      try {
+        textRedactionResult = textRedactor.redactDomText(inputs.domTextRegions || [], fusedDetections);
+        sanitizedDomText = textRedactionResult.sanitizedText || "";
+        textRedactionTrace = textRedactionResult.trace || { totalRedactions: textRedactionResult.totalRedactions || 0 };
+      } catch (redactErr) {
+        console.warn("[PrivacyPipeline] TextRedactor notice:", redactErr?.message || redactErr);
+        sanitizedDomText = "";
+      }
+    } else {
+      console.warn("[PrivacyPipeline] TextRedactor unavailable, skipping DOM text redaction.");
+    }
+
+    let sanitizedScreenshot = null;
+    let screenshotRedactionTrace = { maskedCount: 0 };
+    const screenshotRedactor = (typeof ScreenshotRedactor !== "undefined")
+      ? ScreenshotRedactor
+      : (typeof self !== "undefined" && self.ScreenshotRedactor
+          ? self.ScreenshotRedactor
+          : (typeof global !== "undefined" && global.ScreenshotRedactor ? global.ScreenshotRedactor : null));
+
+    const sourceCanvas = inputs.screenshotCanvas || inputs.canvas || null;
+    if (screenshotRedactor && typeof screenshotRedactor.redact === "function" && sourceCanvas) {
+      try {
+        sanitizedScreenshot = screenshotRedactor.redact(sourceCanvas, fusedDetections, metadata);
+        screenshotRedactionTrace = { maskedCount: sanitizedScreenshot.maskedCount || 0 };
+      } catch (imgErr) {
+        console.warn("[PrivacyPipeline] ScreenshotRedactor notice:", imgErr?.message || imgErr);
+        sanitizedScreenshot = {
+          success: false,
+          canvas: null,
+          dataUrl: null,
+          maskedCount: 0,
+          error: imgErr?.message || String(imgErr)
+        };
+      }
+    } else if (!sourceCanvas) {
+      sanitizedScreenshot = {
+        success: false,
+        canvas: null,
+        dataUrl: null,
+        maskedCount: 0,
+        reason: "no_source_canvas"
+      };
+    }
+
+    // PRIVACY GATE: Final Local Security Boundary
+    let privacyGateResult = {
+      allowed: false,
+      checks: {
+        sanitizedDomPresent: false,
+        sanitizedScreenshotPresent: false,
+        textRedactionComplete: false,
+        visualRedactionComplete: false,
+        outboundSchemaValid: false
+      },
+      reasons: ["PRIVACY_GATE_UNAVAILABLE"],
+      outboundContext: null
+    };
+
+    const privacyGate = (typeof PrivacyGate !== "undefined")
+      ? PrivacyGate
+      : (typeof self !== "undefined" && self.PrivacyGate
+          ? self.PrivacyGate
+          : (typeof global !== "undefined" && global.PrivacyGate ? global.PrivacyGate : null));
+
+    if (privacyGate && typeof privacyGate.validate === "function") {
+      try {
+        privacyGateResult = privacyGate.validate({
+          fusedDetections: fusedDetections,
+          sanitizedDomText: sanitizedDomText,
+          sanitizedScreenshot: sanitizedScreenshot,
+          textRedactionMetadata: textRedactionResult?.redactionMetadata || null,
+          screenshotRedactionMetadata: sanitizedScreenshot?.redactionMetadata || null,
+          domTextRegions: inputs.domTextRegions || [],
+          sourceCanvas: sourceCanvas,
+          context: {
+            goal: inputs.goal || inputs.metadata?.goal || "",
+            pageState: inputs.pageState || null,
+            metadata: metadata,
+            availableActions: inputs.availableActions || null
+          }
+        });
+      } catch (gateErr) {
+        console.error("[PrivacyPipeline] PrivacyGate exception (failing closed):", gateErr);
+        privacyGateResult = {
+          allowed: false,
+          checks: {
+            sanitizedDomPresent: false,
+            sanitizedScreenshotPresent: false,
+            textRedactionComplete: false,
+            visualRedactionComplete: false,
+            outboundSchemaValid: false
+          },
+          reasons: ["INTERNAL_VALIDATION_ERROR"],
+          outboundContext: null
+        };
+      }
+    } else {
+      console.warn("[PrivacyPipeline] PrivacyGate unavailable, failing closed.");
+    }
+
     const result = {
       allRawDetections: allRawDetections,
       contextFilteredDetections: contextFilteredDetections,
       fusedDetections: fusedDetections,
+      sanitizedDomText: sanitizedDomText,
+      sanitizedScreenshot: sanitizedScreenshot,
+      privacyGate: privacyGateResult,
+      textRedactionMetadata: textRedactionResult?.redactionMetadata || null,
       bySource: {
         DOM: domStructural,
         DOM_TEXT: domTextRegex,
@@ -522,7 +676,10 @@ class PrivacyPipeline {
         passedToFusionCount: contextTrace.passedToFusion,
         rawDetectionCount: fusionTrace.rawDetectionCount,
         fusedDetectionCount: fusionTrace.fusedDetectionCount,
-        mergedGroupCount: fusionTrace.mergedGroupCount
+        mergedGroupCount: fusionTrace.mergedGroupCount,
+        textRedactionsCount: textRedactionTrace.totalRedactions || 0,
+        screenshotMaskedCount: screenshotRedactionTrace.maskedCount || 0,
+        privacyGateAllowed: privacyGateResult.allowed
       }
     };
 
@@ -533,10 +690,12 @@ class PrivacyPipeline {
     console.log(` - OCR + Regex:              ${result.trace.ocrRegexCount}`);
     console.log(` - Rampart + Spatial:        ${result.trace.rampartSpatialCount}`);
     console.log(` - TOTAL RAW DETECTIONS:     ${result.trace.totalRawDetections}`);
-    console.log(` - Rampart Rejected Context: ${result.trace.rampartRejectedCount} (${result.trace.rampartLowConfidenceCount} low conf < 0.80)`);
+    console.log(` - Rampart Rejected Context: ${result.trace.rampartRejectedCount} (${result.trace.rampartLowConfidenceCount} below candidate thresholds)`);
     console.log(` - Passed to Fusion:         ${result.trace.passedToFusionCount}`);
     console.log(` - CANONICAL FUSED:          ${result.trace.fusedDetectionCount}`);
     console.log(` - MERGED GROUPS:            ${result.trace.mergedGroupCount}`);
+    console.log(` - Text Redactions:          ${result.trace.textRedactionsCount}`);
+    console.log(` - Screenshot Masked BBoxes: ${result.trace.screenshotMaskedCount}`);
     console.log("--------------------------------------------------");
     console.log(" CANONICAL FUSED DETECTIONS (PIPELINE OUTPUT) ");
     console.log(result.fusedDetections);
@@ -552,6 +711,21 @@ class PrivacyPipeline {
         ` [Fused #${idx + 1}] ${det.type} | Text: "${det.text}" | Conf: ${det.confidence} | Source: ${det.source} (Sources: [${srcList}])${ctxSrcStr}${ocrConfStr} | BBox: ${bboxStr} | Evidence: ${evidCount}`
       );
     });
+    console.log("--------------------------------------------------");
+    console.log(" SANITIZED DOM TEXT (VLM PREVIEW) ");
+    console.log(result.sanitizedDomText || "(none)");
+    console.log("--------------------------------------------------");
+    console.log(` SANITIZED SCREENSHOT: success=${result.sanitizedScreenshot?.success ?? false}, masked=${result.sanitizedScreenshot?.maskedCount ?? 0}`);
+    console.log("--------------------------------------------------");
+    console.log(
+      ` PRIVACY GATE: ${privacyGateResult.allowed ? "ALLOWED" : "BLOCKED"} ` +
+      (privacyGateResult.reasons.length > 0 ? `(Reasons: [${privacyGateResult.reasons.join(", ")}])` : "(Verified)")
+    );
+    console.log(
+      ` Checks: DOM=${privacyGateResult.checks.sanitizedDomPresent} | Screenshot=${privacyGateResult.checks.sanitizedScreenshotPresent} | ` +
+      `TextRedaction=${privacyGateResult.checks.textRedactionComplete} | VisualRedaction=${privacyGateResult.checks.visualRedactionComplete} | ` +
+      `Schema=${privacyGateResult.checks.outboundSchemaValid}`
+    );
     console.log("==================================================");
 
     return result;

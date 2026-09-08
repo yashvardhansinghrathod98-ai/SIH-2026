@@ -33,7 +33,9 @@ class TextDetector {
           text: match[0],
           confidence: 0.99,
           reason: "email-regex",
-          bbox: bbox
+          bbox: bbox,
+          start: match.index,
+          end: match.index + match[0].length
         })
       );
     }
@@ -47,6 +49,9 @@ class TextDetector {
 
       // Ensure valid 10-digit or 12-digit (with 91 prefix) mobile number length
       if (digitsOnly.length === 10 || (digitsOnly.length === 12 && digitsOnly.startsWith("91"))) {
+        const offsetInMatch = match[0].indexOf(matchedText);
+        const matchStart = match.index + (offsetInMatch >= 0 ? offsetInMatch : 0);
+        const matchEnd = matchStart + matchedText.length;
         detections.push(
           createPIIDetection({
             type: typeof PIIType !== "undefined" ? PIIType.PHONE : "PHONE",
@@ -55,7 +60,9 @@ class TextDetector {
             text: matchedText,
             confidence: 0.95,
             reason: "indian-phone-regex",
-            bbox: bbox
+            bbox: bbox,
+            start: matchStart,
+            end: matchEnd
           })
         );
       }
@@ -69,6 +76,9 @@ class TextDetector {
       const digitsOnly = matchedText.replace(/\D/g, "");
 
       if (TextDetector.isValidLuhn(digitsOnly)) {
+        const offsetInMatch = match[0].indexOf(matchedText);
+        const matchStart = match.index + (offsetInMatch >= 0 ? offsetInMatch : 0);
+        const matchEnd = matchStart + matchedText.length;
         detections.push(
           createPIIDetection({
             type: typeof PIIType !== "undefined" ? PIIType.CARD : "CARD",
@@ -77,7 +87,9 @@ class TextDetector {
             text: matchedText,
             confidence: 0.99,
             reason: "luhn-card-regex",
-            bbox: bbox
+            bbox: bbox,
+            start: matchStart,
+            end: matchEnd
           })
         );
       }

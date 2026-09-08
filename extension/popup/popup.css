@@ -205,3 +205,204 @@ pre {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* Section 9: Privacy Gate Styling */
+.gate-status-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.gate-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.gate-status-indicator.allowed {
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.gate-status-indicator.blocked {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.gate-status-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.gate-status-text strong {
+  font-size: 12px;
+  display: block;
+}
+
+.gate-status-text p {
+  font-size: 11px;
+  margin-top: 2px;
+  opacity: 0.9;
+}
+
+.gate-checks-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  font-size: 10.5px;
+  background-color: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+}
+
+.gate-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+}
+
+.gate-check-item.passed {
+  color: #047857;
+  font-weight: 600;
+}
+
+.gate-check-item.failed {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.gate-reasons-box {
+  background-color: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 6px;
+}
+
+.gate-reasons-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #9f1239;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.gate-reasons-box ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 10px;
+  color: #be123c;
+}
+
+/* Text Redaction Diagnostics in Gate */
+.gate-diagnostics-card {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.diagnostics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.diagnostics-header strong {
+  font-size: 11px;
+  color: #334155;
+}
+
+.diag-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.diag-badge.pass {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.diag-badge.fail {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.diag-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 6px;
+  font-size: 10px;
+  color: #475569;
+  background-color: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.diag-metric {
+  display: flex;
+  justify-content: space-between;
+  padding: 1px 2px;
+}
+
+.diag-metric strong {
+  color: #0f172a;
+}
+
+.diag-unresolved-container {
+  margin-top: 6px;
+}
+
+.diag-unresolved-title {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #b91c1c;
+  margin-bottom: 4px;
+}
+
+.diag-unresolved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.diag-unresolved-item {
+  background-color: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 9.5px;
+  line-height: 1.35;
+  color: #881337;
+}
+
+.diag-unresolved-item .item-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+  color: #9f1239;
+  margin-bottom: 2px;
+}
+
+.diag-unresolved-item .item-details {
+  color: #4c0519;
+}
+
+

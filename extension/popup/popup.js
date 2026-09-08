@@ -45,6 +45,43 @@ document.addEventListener("DOMContentLoaded", () => {
   const mergedCount = document.getElementById("merged-count");
   const fusedJsonOutput = document.getElementById("fused-json-output");
 
+  const sanitizedDomTextContainer = document.getElementById("sanitized-dom-text-container");
+  const sanitizedTextRedactionsCount = document.getElementById("sanitized-text-redactions-count");
+  const sanitizedDomTextOutput = document.getElementById("sanitized-dom-text-output");
+
+  const sanitizedScreenshotContainer = document.getElementById("sanitized-screenshot-container");
+  const sanitizedScreenshotMaskedCount = document.getElementById("sanitized-screenshot-masked-count");
+  const sanitizedCanvasPreview = document.getElementById("sanitized-canvas-preview");
+  const sanitizedScreenshotStatus = document.getElementById("sanitized-screenshot-status");
+
+  const privacyGateContainer = document.getElementById("privacy-gate-container");
+  const privacyGateBadge = document.getElementById("privacy-gate-badge");
+  const privacyGateCard = document.getElementById("privacy-gate-card");
+  const privacyGateStatusIndicator = document.getElementById("privacy-gate-status-indicator");
+  const privacyGateStatusIcon = document.getElementById("privacy-gate-status-icon");
+  const privacyGateStatusTitle = document.getElementById("privacy-gate-status-title");
+  const privacyGateStatusDesc = document.getElementById("privacy-gate-status-desc");
+  const chkDom = document.getElementById("chk-dom");
+  const chkScreenshot = document.getElementById("chk-screenshot");
+  const chkTextRedact = document.getElementById("chk-text-redact");
+  const chkVisualRedact = document.getElementById("chk-visual-redact");
+  const chkSchema = document.getElementById("chk-schema");
+  const privacyGateReasons = document.getElementById("privacy-gate-reasons");
+  const privacyGateReasonsList = document.getElementById("privacy-gate-reasons-list");
+  const privacyGateJsonOutput = document.getElementById("privacy-gate-json-output");
+
+  const textRedactionDiagnostics = document.getElementById("text-redaction-diagnostics");
+  const textDiagTitle = document.getElementById("text-diag-title");
+  const textDiagBadge = document.getElementById("text-diag-badge");
+  const diagMetricRequired = document.getElementById("diag-metric-required");
+  const diagMetricMapped = document.getElementById("diag-metric-mapped");
+  const diagMetricApplied = document.getElementById("diag-metric-applied");
+  const diagMetricCovered = document.getElementById("diag-metric-covered");
+  const diagMetricUnresolved = document.getElementById("diag-metric-unresolved");
+  const diagMetricVerifFails = document.getElementById("diag-metric-verif-fails");
+  const textDiagUnresolvedContainer = document.getElementById("text-diag-unresolved-container");
+  const textDiagUnresolvedList = document.getElementById("text-diag-unresolved-list");
+
   const dbgWidth = document.getElementById("dbg-width");
   const dbgHeight = document.getElementById("dbg-height");
   const dbgHasData = document.getElementById("dbg-hasdata");
@@ -83,6 +120,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pageState: currentObservations.pageState,
       domTextRegions: currentObservations.domTextRegions,
       ocrResults: currentObservations.ocrResults,
+      screenshotCanvas: canvasPreview && canvasPreview.width > 0 ? canvasPreview : null,
       metadata: metadata
     });
 
@@ -124,6 +162,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if (mergedCount) mergedCount.textContent = result.trace?.mergedGroupCount ?? 0;
     if (fusedJsonOutput) fusedJsonOutput.textContent = JSON.stringify(fusedDetections, null, 2);
     if (fusedDebugContainer) fusedDebugContainer.classList.remove("hidden");
+
+    // 7. SANITIZED DOM TEXT (Section 7)
+    renderSanitizedDOMText(
+      result.sanitizedDomText,
+      result.trace?.textRedactionsCount ?? 0
+    );
+
+    // 8. SANITIZED SCREENSHOT (Section 8)
+    renderSanitizedScreenshot(result.sanitizedScreenshot);
+
+    // 9. PRIVACY GATE STATUS & OUTBOUND CONTEXT (Section 9)
+    renderPrivacyGate(result.privacyGate, result.textRedactionMetadata);
 
     // Main JSON Output Window: Show ONLY fused results
     currentJsonData = fusedDetections;
@@ -368,6 +418,184 @@ document.addEventListener("DOMContentLoaded", () => {
     if (ocrPiiCount) ocrPiiCount.textContent = piiDetections.length;
     if (ocrPiiJsonOutput) ocrPiiJsonOutput.textContent = JSON.stringify(piiDetections, null, 2);
     if (ocrPiiDebugContainer) ocrPiiDebugContainer.classList.remove("hidden");
+  }
+
+  function renderSanitizedDOMText(sanitizedText, redactionsCount) {
+    if (sanitizedTextRedactionsCount) sanitizedTextRedactionsCount.textContent = redactionsCount;
+    if (sanitizedDomTextOutput) {
+      sanitizedDomTextOutput.textContent = (sanitizedText && sanitizedText.trim())
+        ? sanitizedText
+        : "// No visible DOM text available to sanitize.";
+    }
+    if (sanitizedDomTextContainer) sanitizedDomTextContainer.classList.remove("hidden");
+  }
+
+  function renderSanitizedScreenshot(sanitizedScreenshot) {
+    if (!sanitizedScreenshotContainer) return;
+
+    if (!sanitizedScreenshot || !sanitizedScreenshot.success || !sanitizedScreenshot.canvas) {
+      if (sanitizedScreenshotStatus) {
+        if (sanitizedScreenshot?.reason === "no_source_canvas") {
+          sanitizedScreenshotStatus.textContent = "No screenshot captured yet. Capture canvas and run OCR to generate sanitized screenshot.";
+          sanitizedScreenshotStatus.className = "status-container info";
+        } else {
+          sanitizedScreenshotStatus.textContent = "Screenshot Sanitization Notice: " + (sanitizedScreenshot?.error || "Visual redaction unavailable.");
+          sanitizedScreenshotStatus.className = "status-container error";
+        }
+        sanitizedScreenshotStatus.classList.remove("hidden");
+      }
+      if (sanitizedCanvasPreview) {
+        sanitizedCanvasPreview.width = 0;
+        sanitizedCanvasPreview.height = 0;
+      }
+      sanitizedScreenshotContainer.classList.remove("hidden");
+      return;
+    }
+
+    if (sanitizedScreenshotStatus) {
+      sanitizedScreenshotStatus.classList.add("hidden");
+    }
+
+    if (sanitizedScreenshotMaskedCount) {
+      sanitizedScreenshotMaskedCount.textContent = sanitizedScreenshot.maskedCount;
+    }
+
+    if (sanitizedCanvasPreview) {
+      sanitizedCanvasPreview.width = sanitizedScreenshot.canvas.width;
+      sanitizedCanvasPreview.height = sanitizedScreenshot.canvas.height;
+      const ctx = sanitizedCanvasPreview.getContext("2d");
+      ctx.clearRect(0, 0, sanitizedCanvasPreview.width, sanitizedCanvasPreview.height);
+      ctx.drawImage(sanitizedScreenshot.canvas, 0, 0);
+    }
+
+    sanitizedScreenshotContainer.classList.remove("hidden");
+  }
+
+  function renderPrivacyGate(gateResult, textRedactionMetadata = null) {
+    if (!privacyGateContainer) return;
+    if (!gateResult) {
+      privacyGateContainer.classList.add("hidden");
+      return;
+    }
+
+    const isAllowed = Boolean(gateResult.allowed);
+    const checks = gateResult.checks || {};
+    const reasons = Array.isArray(gateResult.reasons) ? gateResult.reasons : [];
+    const outboundContext = gateResult.outboundContext || null;
+
+    if (privacyGateBadge) {
+      privacyGateBadge.textContent = isAllowed ? "ALLOWED" : "BLOCKED";
+      privacyGateBadge.style.color = isAllowed ? "#059669" : "#dc2626";
+    }
+
+    if (privacyGateStatusIndicator) {
+      privacyGateStatusIndicator.className = `gate-status-indicator ${isAllowed ? "allowed" : "blocked"}`;
+    }
+    if (privacyGateStatusIcon) {
+      privacyGateStatusIcon.textContent = isAllowed ? "🟢" : "🔴";
+    }
+    if (privacyGateStatusTitle) {
+      privacyGateStatusTitle.textContent = isAllowed ? "ALLOWED" : "BLOCKED";
+    }
+    if (privacyGateStatusDesc) {
+      privacyGateStatusDesc.textContent = isAllowed
+        ? "All required redactions verified. Safe to send sanitized context."
+        : (reasons.length > 0
+            ? `Transmission blocked: ${reasons.join(", ")}`
+            : "Transmission blocked by Privacy Gate.");
+    }
+
+    function updateCheckItem(el, passed, label) {
+      if (!el) return;
+      el.className = `gate-check-item ${passed ? "passed" : "failed"}`;
+      el.innerHTML = `<span class="chk-icon">${passed ? "✅" : "❌"}</span> ${label}`;
+    }
+
+    updateCheckItem(chkDom, Boolean(checks.sanitizedDomPresent), "Sanitized DOM");
+    updateCheckItem(chkScreenshot, Boolean(checks.sanitizedScreenshotPresent), "Sanitized Screenshot");
+    updateCheckItem(chkTextRedact, Boolean(checks.textRedactionComplete), "Text Redaction");
+    updateCheckItem(chkVisualRedact, Boolean(checks.visualRedactionComplete), "Visual Redaction");
+    updateCheckItem(chkSchema, Boolean(checks.outboundSchemaValid), "Outbound Schema");
+
+    if (privacyGateReasons && privacyGateReasonsList) {
+      if (reasons.length > 0) {
+        privacyGateReasonsList.innerHTML = reasons.map(r => `<li>${r}</li>`).join("");
+        privacyGateReasons.classList.remove("hidden");
+      } else {
+        privacyGateReasonsList.innerHTML = "";
+        privacyGateReasons.classList.add("hidden");
+      }
+    }
+
+    // Render safe text redaction diagnostics
+    const meta = textRedactionMetadata || gateResult.textRedactionMetadata || null;
+    renderTextRedactionDiagnostics(meta);
+
+    if (privacyGateJsonOutput) {
+      privacyGateJsonOutput.textContent = isAllowed && outboundContext
+        ? JSON.stringify(outboundContext, null, 2)
+        : "// NULL (Blocked: Outbound transmission prohibited)";
+    }
+
+    privacyGateContainer.classList.remove("hidden");
+  }
+
+  function renderTextRedactionDiagnostics(metadata) {
+    if (!textRedactionDiagnostics) return;
+    if (!metadata || !metadata.summary) {
+      textRedactionDiagnostics.classList.add("hidden");
+      return;
+    }
+
+    const summary = metadata.summary;
+    const unredacted = Array.isArray(metadata.unredactedDetections) ? metadata.unredactedDetections : [];
+    const isComplete = Boolean(metadata.textRedactionComplete);
+
+    if (diagMetricRequired) diagMetricRequired.textContent = summary.required;
+    if (diagMetricMapped) diagMetricMapped.textContent = summary.mapped;
+    if (diagMetricApplied) diagMetricApplied.textContent = summary.applied;
+    if (diagMetricCovered) diagMetricCovered.textContent = summary.covered;
+    if (diagMetricUnresolved) diagMetricUnresolved.textContent = summary.unresolved;
+    if (diagMetricVerifFails) diagMetricVerifFails.textContent = summary.verificationFailures;
+
+    if (textDiagBadge) {
+      textDiagBadge.textContent = isComplete ? "PASS" : "FAIL";
+      textDiagBadge.className = `diag-badge ${isComplete ? "pass" : "fail"}`;
+    }
+
+    if (unredacted.length > 0) {
+      if (textDiagUnresolvedList) {
+        textDiagUnresolvedList.innerHTML = unredacted.map(item => {
+          const bboxStr = item.bbox
+            ? `[x:${Math.round(item.bbox.x)}, y:${Math.round(item.bbox.y)}, w:${Math.round(item.bbox.width)}, h:${Math.round(item.bbox.height)}]`
+            : "none";
+          const mappingStr = `Required: ${item.textMapping?.required ? "Yes" : "No"} | Mapped: ${item.textMapping?.matched ? "Yes" : "No"} | Span: ${item.textMapping?.spanFound ? "Yes" : "No"}`;
+          const redactStr = `Attempted: ${item.redaction?.attempted ? "Yes" : "No"} | Applied: ${item.redaction?.applied ? "Yes" : "No"} | Covered: ${item.redaction?.covered ? "Yes" : "No"}`;
+          const srcStr = Array.isArray(item.sources) ? item.sources.join(", ") : (item.source || "UNKNOWN");
+
+          return `
+            <div class="diag-unresolved-item">
+              <div class="item-header">
+                <span>#${item.detectionIndex !== undefined ? item.detectionIndex + 1 : "?"} ${item.type}</span>
+                <span>${item.reason || "UNRESOLVED"}</span>
+              </div>
+              <div class="item-details">
+                <div><strong>Source:</strong> ${srcStr} | <strong>Context:</strong> ${item.contextSource || "none"} | <strong>Element:</strong> ${item.elementId || "none"}</div>
+                <div><strong>Location (BBox):</strong> ${bboxStr}</div>
+                <div><strong>Mapping:</strong> ${mappingStr}</div>
+                <div><strong>Redaction:</strong> ${redactStr}</div>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+      if (textDiagUnresolvedContainer) textDiagUnresolvedContainer.classList.remove("hidden");
+    } else {
+      if (textDiagUnresolvedList) textDiagUnresolvedList.innerHTML = "";
+      if (textDiagUnresolvedContainer) textDiagUnresolvedContainer.classList.add("hidden");
+    }
+
+    textRedactionDiagnostics.classList.remove("hidden");
   }
 
   function renderCanvasDebug(stats) {

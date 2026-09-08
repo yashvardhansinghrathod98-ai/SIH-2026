@@ -118,6 +118,78 @@
       </div>
     </div>
 
+    <!-- Section 7: Sanitized DOM Text -->
+    <div id="sanitized-dom-text-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>SANITIZED DOM TEXT (<span id="sanitized-text-redactions-count">0</span> redactions)</span>
+      </div>
+      <div class="json-container" style="background-color: #0f172a; color: #34d399;">
+        <pre id="sanitized-dom-text-output">// Sanitized DOM Text Output</pre>
+      </div>
+    </div>
+
+    <!-- Section 8: Sanitized Screenshot -->
+    <div id="sanitized-screenshot-container" class="canvas-container hidden">
+      <div class="json-header">
+        <span>SANITIZED SCREENSHOT (<span id="sanitized-screenshot-masked-count">0</span> regions masked)</span>
+      </div>
+      <div class="preview-box">
+        <canvas id="sanitized-canvas-preview"></canvas>
+      </div>
+      <div id="sanitized-screenshot-status" class="status-container info hidden" style="margin-top: 6px;"></div>
+    </div>
+
+    <!-- Section 9: Privacy Gate Status & Outbound Context -->
+    <div id="privacy-gate-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>SECTION 9: PRIVACY GATE (<span id="privacy-gate-badge">BLOCKED</span>)</span>
+      </div>
+      <div id="privacy-gate-card" class="gate-status-card">
+        <div id="privacy-gate-status-indicator" class="gate-status-indicator blocked">
+          <span id="privacy-gate-status-icon" class="gate-status-icon">🔴</span>
+          <div class="gate-status-text">
+            <strong id="privacy-gate-status-title">BLOCKED</strong>
+            <p id="privacy-gate-status-desc">Privacy Gate validation not run yet.</p>
+          </div>
+        </div>
+        <div id="privacy-gate-checks" class="gate-checks-grid">
+          <div class="gate-check-item" id="chk-dom"><span class="chk-icon">⚪</span> Sanitized DOM</div>
+          <div class="gate-check-item" id="chk-screenshot"><span class="chk-icon">⚪</span> Sanitized Screenshot</div>
+          <div class="gate-check-item" id="chk-text-redact"><span class="chk-icon">⚪</span> Text Redaction</div>
+          <div class="gate-check-item" id="chk-visual-redact"><span class="chk-icon">⚪</span> Visual Redaction</div>
+          <div class="gate-check-item" id="chk-schema"><span class="chk-icon">⚪</span> Outbound Schema</div>
+        </div>
+        <div id="privacy-gate-reasons" class="gate-reasons-box hidden">
+          <span class="gate-reasons-title">Blocking Reasons:</span>
+          <ul id="privacy-gate-reasons-list"></ul>
+        </div>
+        <div id="text-redaction-diagnostics" class="gate-diagnostics-card hidden">
+          <div class="diagnostics-header">
+            <strong id="text-diag-title">Text Redaction Diagnostics</strong>
+            <span id="text-diag-badge" class="diag-badge pass">PASS</span>
+          </div>
+          <div id="text-diag-summary" class="diag-summary-grid">
+            <div class="diag-metric"><span>Required:</span> <strong id="diag-metric-required">0</strong></div>
+            <div class="diag-metric"><span>Mapped:</span> <strong id="diag-metric-mapped">0</strong></div>
+            <div class="diag-metric"><span>Applied:</span> <strong id="diag-metric-applied">0</strong></div>
+            <div class="diag-metric"><span>Covered:</span> <strong id="diag-metric-covered">0</strong></div>
+            <div class="diag-metric"><span>Unresolved:</span> <strong id="diag-metric-unresolved">0</strong></div>
+            <div class="diag-metric"><span>Verif. Fails:</span> <strong id="diag-metric-verif-fails">0</strong></div>
+          </div>
+          <div id="text-diag-unresolved-container" class="diag-unresolved-container hidden">
+            <span class="diag-unresolved-title">Unresolved Text Redactions (Fail-Closed):</span>
+            <div id="text-diag-unresolved-list" class="diag-unresolved-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="json-header" style="margin-top: 8px;">
+        <span>SANITIZED OUTBOUND CONTEXT (Permitted to cross VLM boundary)</span>
+      </div>
+      <div class="json-container" style="background-color: #022c22; color: #6ee7b7;">
+        <pre id="privacy-gate-json-output">// Outbound Context Package (null when blocked)</pre>
+      </div>
+    </div>
+
     <div class="json-header">
       <span id="output-title">PageState / OCR Output JSON</span>
     </div>
@@ -142,6 +214,9 @@
   <script src="../privacy/ocr-quality/ocr-line-builder.js"></script>
   <script src="../privacy/context-analysis/context-analyzer.js"></script>
   <script src="../privacy/confidence-fusion/fusion-engine.js"></script>
+  <script src="../privacy/redaction/text-redactor.js"></script>
+  <script src="../privacy/redaction/screenshot-redactor.js"></script>
+  <script src="../privacy/privacy-gate/privacy-gate.js"></script>
   <script src="../privacy/privacy-pipeline.js"></script>
   <script src="popup.js"></script>
 </body>

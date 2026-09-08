@@ -30,12 +30,38 @@ const RAMPART_NAME_TYPES = new Set([
   "NAME"
 ]);
 
-const RAMPART_SEMANTIC_MIN_CONFIDENCE = 0.80;
+// Centralized engineering candidate admission thresholds for Rampart NER detections.
+// Lower thresholds admit candidates into Context Analysis so contextual evidence can validate them.
+const RAMPART_CANDIDATE_THRESHOLDS = Object.freeze({
+  // Identity & Names: Permissive candidate threshold (admit into Context Analysis)
+  GIVEN_NAME: 0.55,
+  SURNAME: 0.55,
+  NAME: 0.55,
 
-const RAMPART_SEMANTIC_TYPES = new Set([
-  ...RAMPART_NAME_TYPES,
-  ...ADDRESS_TYPES
-]);
+  // Address Components: Stricter candidate thresholds to filter standalone noise
+  BUILDING_NUMBER: 0.80,
+  STREET_NAME: 0.80,
+  SECONDARY_ADDRESS: 0.80,
+
+  CITY: 0.75,
+  STATE: 0.75,
+  ZIP_CODE: 0.80
+});
+
+const DEFAULT_RAMPART_CANDIDATE_THRESHOLD = 0.80;
+
+/**
+ * Resolves the minimum candidate admission threshold for a Rampart entity type.
+ *
+ * @param {string} type - Rampart entity type string
+ * @returns {number} Minimum confidence threshold
+ */
+function getRampartCandidateThreshold(type) {
+  if (!type || typeof type !== "string") {
+    return DEFAULT_RAMPART_CANDIDATE_THRESHOLD;
+  }
+  return RAMPART_CANDIDATE_THRESHOLDS[type] ?? DEFAULT_RAMPART_CANDIDATE_THRESHOLD;
+}
 
 /**
  * Derives coordinate scale factors from observation metadata.
@@ -182,11 +208,97 @@ function isValidAddressCluster(cluster) {
     return true;
   }
 
-  // 3 or more distinct address component types
+// 3 or more distinct address component types
   if (types.size >= 3) {
     return true;
   }
 
+  return false;
+}
+
+/**
+ * Resolves the region index for a DOM-origin detection.
+ *
+ * @param {Object} det
+ * @returns {number|null}
+ */
+function getDetectionRegionIndex(det) {
+  if (!det || typeof det !== "object") return null;
+  if (typeof det.regionIndex === "number") return det.regionIndex;
+  if (typeof det.reason === "string") {
+    const match = /:reg(\d+)/.exec(det.reason);
+    if (match) return parseInt(match[1], 10);
+  }
+  return null;
+}
+
+/**
+ * Checks whether a Rampart semantic name candidate (GIVEN_NAME, SURNAME, NAME)
+ * has sufficient contextual evidence to proceed to Fusion.
+ *
+ * An isolated single-token Rampart name with no form context and no corroborating
+ * counterpart name is rejected as statistical NLP noise on web UI text.
+ *
+ * @param {Object} candidate - Rampart name detection
+ * @param {Array<Object>} allNameCandidates - All Rampart name candidates
+ * @returns {boolean}
+ */
+function isCorroboratedNameCandidate(candidate, allNameCandidates) {
+  if (!candidate || typeof candidate !== "object") return false;
+
+  // 1. Names associated with explicit form/input context are retained
+  if (candidate.elementId) {
+    return true;
+  }
+  if (typeof candidate.reason === "string") {
+    const r = candidate.reason.toLowerCase();
+    if (r.startsWith("input[") || r.startsWith("autocomplete") || r.includes("name-field") || r.includes("form")) {
+      return true;
+    }
+  }
+
+  // 2. Multi-token names (e.g. "John Smith", "Alice Walker") contain internal first/last corroboration
+  const rawText = (candidate.text || "").trim();
+  const tokens = rawText.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 2) {
+    return true;
+  }
+
+  // 3. Corroborating GIVEN_NAME / SURNAME in the same canonical DOM text region / context
+  const regIdx = getDetectionRegionIndex(candidate);
+  if (regIdx !== null) {
+    for (const other of allNameCandidates) {
+      if (other === candidate) continue;
+      const otherRegIdx = getDetectionRegionIndex(other);
+      if (otherRegIdx === null) continue;
+
+      // Same canonical DOM text region or immediately adjacent reading-order sibling region
+      if (Math.abs(regIdx - otherRegIdx) <= 1) {
+        if (
+          (candidate.type === "SURNAME" && (other.type === "GIVEN_NAME" || other.type === "NAME")) ||
+          (candidate.type === "GIVEN_NAME" && (other.type === "SURNAME" || other.type === "NAME")) ||
+          (candidate.type === "NAME" && (other.type === "GIVEN_NAME" || other.type === "SURNAME" || other.type === "NAME"))
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // 4. OCR line context: if another complementary name exists on OCR
+  if (candidate.contextSource === "OCR") {
+    for (const other of allNameCandidates) {
+      if (other === candidate || other.contextSource !== "OCR") continue;
+      if (
+        (candidate.type === "SURNAME" && (other.type === "GIVEN_NAME" || other.type === "NAME")) ||
+        (candidate.type === "GIVEN_NAME" && (other.type === "SURNAME" || other.type === "NAME"))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // Isolated single-token Rampart name without contextual corroboration
   return false;
 }
 
@@ -209,7 +321,7 @@ class ContextAnalyzer {
           rampartBefore: 0,
           rampartRejected: 0,
           rampartLowConfidence: 0,
-          rampartMinConfidenceThreshold: RAMPART_SEMANTIC_MIN_CONFIDENCE,
+          rampartCandidateThresholds: RAMPART_CANDIDATE_THRESHOLDS,
           passedToFusion: 0
         }
       };
@@ -218,6 +330,7 @@ class ContextAnalyzer {
     try {
       const scaleInfo = getScale(metadata);
       const passed = [];
+      const rampartNameCandidates = [];
       const rampartAddressCandidates = [];
 
       let rampartBeforeCount = 0;
@@ -244,20 +357,20 @@ class ContextAnalyzer {
           continue;
         }
 
-        // Rule 3: Rampart Confidence Gate: Semantic detections must have confidence >= 0.80
-        if (RAMPART_SEMANTIC_TYPES.has(det.type)) {
-          const rawConf = typeof det.confidence === "number" ? det.confidence : 0;
-          const conf = rawConf > 1 ? rawConf / 100 : rawConf;
-          if (conf < RAMPART_SEMANTIC_MIN_CONFIDENCE) {
-            rampartRejectedCount++;
-            rampartLowConfidenceCount++;
-            continue;
-          }
+        // Rule 3: Type-Specific Rampart Candidate Confidence Gate
+        const threshold = getRampartCandidateThreshold(det.type);
+        const rawConf = typeof det.confidence === "number" ? det.confidence : 0;
+        const conf = rawConf > 1 ? rawConf / 100 : rawConf;
+
+        if (conf < threshold) {
+          rampartRejectedCount++;
+          rampartLowConfidenceCount++;
+          continue;
         }
 
-        // Rule 4: Rampart semantic names pass through to Fusion
+        // Rule 4: Rampart semantic names require contextual corroboration
         if (RAMPART_NAME_TYPES.has(det.type)) {
-          passed.push(det);
+          rampartNameCandidates.push(det);
           continue;
         }
 
@@ -275,7 +388,22 @@ class ContextAnalyzer {
         passed.push(det);
       }
 
-      // Step 2: Contextual grouping and evaluation of Rampart address candidates
+      // Step 2A: Contextual evaluation of Rampart semantic name candidates (Rule 4)
+      if (rampartNameCandidates.length > 0) {
+        for (const nameCandidate of rampartNameCandidates) {
+          if (isCorroboratedNameCandidate(nameCandidate, rampartNameCandidates)) {
+            passed.push(nameCandidate);
+          } else {
+            rampartRejectedCount++;
+            console.log(
+              `[ContextAnalyzer] Rejected isolated Rampart name candidate "${nameCandidate.type}" ` +
+              `without corroborating name/form context (confidence: ${nameCandidate.confidence}).`
+            );
+          }
+        }
+      }
+
+      // Step 2B: Contextual grouping and evaluation of Rampart address candidates (Rule 5)
       if (rampartAddressCandidates.length > 0) {
         const numCandidates = rampartAddressCandidates.length;
         const visited = new Uint8Array(numCandidates);
@@ -318,13 +446,13 @@ class ContextAnalyzer {
         rampartBefore: rampartBeforeCount,
         rampartRejected: rampartRejectedCount,
         rampartLowConfidence: rampartLowConfidenceCount,
-        rampartMinConfidenceThreshold: RAMPART_SEMANTIC_MIN_CONFIDENCE,
+        rampartCandidateThresholds: RAMPART_CANDIDATE_THRESHOLDS,
         passedToFusion: passed.length
       };
 
       console.log(
         `[ContextAnalyzer] Filtered ${allRawDetections.length} raw detections: ` +
-        `${rampartRejectedCount} Rampart detections rejected (${rampartLowConfidenceCount} low confidence < ${RAMPART_SEMANTIC_MIN_CONFIDENCE}), ` +
+        `${rampartRejectedCount} Rampart detections rejected (${rampartLowConfidenceCount} below candidate thresholds), ` +
         `${passed.length} passed to Fusion.`
       );
 
@@ -341,7 +469,7 @@ class ContextAnalyzer {
           rampartBefore: 0,
           rampartRejected: 0,
           rampartLowConfidence: 0,
-          rampartMinConfidenceThreshold: RAMPART_SEMANTIC_MIN_CONFIDENCE,
+          rampartCandidateThresholds: RAMPART_CANDIDATE_THRESHOLDS,
           passedToFusion: allRawDetections.length
         }
       };
@@ -349,9 +477,20 @@ class ContextAnalyzer {
   }
 }
 
+ContextAnalyzer.RAMPART_CANDIDATE_THRESHOLDS = RAMPART_CANDIDATE_THRESHOLDS;
+ContextAnalyzer.DEFAULT_RAMPART_CANDIDATE_THRESHOLD = DEFAULT_RAMPART_CANDIDATE_THRESHOLD;
+ContextAnalyzer.getCandidateThreshold = getRampartCandidateThreshold;
+
 if (typeof self !== "undefined") {
   self.ContextAnalyzer = ContextAnalyzer;
+  self.RAMPART_CANDIDATE_THRESHOLDS = RAMPART_CANDIDATE_THRESHOLDS;
+  self.getRampartCandidateThreshold = getRampartCandidateThreshold;
 }
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { ContextAnalyzer };
+  module.exports = {
+    ContextAnalyzer,
+    RAMPART_CANDIDATE_THRESHOLDS,
+    DEFAULT_RAMPART_CANDIDATE_THRESHOLD,
+    getRampartCandidateThreshold
+  };
 }

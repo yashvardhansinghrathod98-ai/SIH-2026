@@ -103,7 +103,9 @@ class DOMTextExtractor {
           }
         }
 
+        const regionIndex = textRegions.length;
         textRegions.push({
+          regionIndex: regionIndex,
           text: rawText,
           bbox: {
             x: Math.round(rect.left),

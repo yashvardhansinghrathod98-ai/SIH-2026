@@ -111,33 +111,61 @@ class RampartAdapter {
    * @returns {{ start: number, end: number, text: string }|null}
    */
   static alignSpan(originalText, tokens, startSearchPos = 0) {
-    if (!originalText || typeof originalText !== "string" || tokens.length === 0) {
+    if (!originalText || typeof originalText !== "string" || !Array.isArray(tokens) || tokens.length === 0) {
       return null;
     }
 
+    // Strategy 1: Direct token classification character offsets if provided by Transformers.js
+    const firstTok = tokens[0];
+    const lastTok = tokens[tokens.length - 1];
+    if (
+      firstTok &&
+      lastTok &&
+      typeof firstTok.start === "number" &&
+      typeof lastTok.end === "number" &&
+      firstTok.start >= 0 &&
+      lastTok.end <= originalText.length &&
+      firstTok.start < lastTok.end
+    ) {
+      return {
+        start: firstTok.start,
+        end: lastTok.end,
+        text: originalText.slice(firstTok.start, lastTok.end)
+      };
+    }
+
+    // Strategy 2: Sequential token alignment with diacritic-folding support
+    const stripAccents = s => (typeof s === "string" ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "");
     const lowerText = originalText.toLowerCase();
+    const normText = stripAccents(lowerText);
+    const hasSameLen = normText.length === originalText.length;
+    const searchText = hasSameLen ? normText : lowerText;
+
     let firstStart = -1;
     let lastEnd = -1;
     let currentPos = startSearchPos;
 
     for (let i = 0; i < tokens.length; i++) {
       const rawWord = tokens[i].word;
+      if (!rawWord || typeof rawWord !== "string") continue;
       const cleanWord = rawWord.startsWith("##") ? rawWord.slice(2) : rawWord;
+      const searchWord = (hasSameLen ? stripAccents(cleanWord) : cleanWord).toLowerCase();
+      if (!searchWord) continue;
 
-      const matchIdx = lowerText.indexOf(cleanWord, currentPos);
+      const matchIdx = searchText.indexOf(searchWord, currentPos);
       if (matchIdx === -1) {
         // Fallback: search from beginning if forward search missed
-        const retryIdx = lowerText.indexOf(cleanWord);
+        const retryIdx = searchText.indexOf(searchWord);
         if (retryIdx === -1) return null;
         currentPos = retryIdx;
       } else {
         currentPos = matchIdx;
       }
 
-      if (i === 0) {
+      if (firstStart === -1) {
         firstStart = currentPos;
       }
-      lastEnd = currentPos + cleanWord.length;
+      lastEnd = currentPos + searchWord.length;
       currentPos = lastEnd;
     }
 
