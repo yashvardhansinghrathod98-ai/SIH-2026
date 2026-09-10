@@ -1,0 +1,6 @@
+path: c:\Users\HP\OneDrive\Desktop\SIH_GIT\SIH-2026\qr_dataset
+train: images/train
+val: images/val
+
+names:
+  0: QR_code

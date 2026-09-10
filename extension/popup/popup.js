@@ -103,7 +103,11 @@ document.addEventListener("DOMContentLoaded", () => {
           if (canvasDim) canvasDim.textContent = `${width} × ${height} px`;
           if (canvasContainer) canvasContainer.classList.remove("hidden");
           if (ocrBtn) ocrBtn.disabled = false;
-          showStatus(`Canvas ready! ${stats.nonZeroPercent}% non-zero pixels. Click 'Run Local OCR'.`, "info");
+          const qrBtn = document.getElementById("qr-detect-btn");
+          if (qrBtn) qrBtn.disabled = false;
+          const yoloBtn = document.getElementById("yolo-face-btn");
+          if (yoloBtn) yoloBtn.disabled = false;
+          showStatus(`Canvas ready! ${stats.nonZeroPercent}% non-zero pixels. Select a vision test.`, "info");
         } else {
           const errorMsg = response?.message || "Failed to capture screenshot.";
           showStatus(errorMsg, "error");
@@ -116,6 +120,154 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
+  const qrDetectBtn = document.getElementById("qr-detect-btn");
+  const yoloFaceBtn = document.getElementById("yolo-face-btn");
+  const qrDebugContainer = document.getElementById("qr-debug-container");
+  const qrCount = document.getElementById("qr-count");
+  const qrJsonOutput = document.getElementById("qr-json-output");
+
+  const faceDebugContainer = document.getElementById("face-debug-container");
+  const faceCount = document.getElementById("face-count");
+  const faceJsonOutput = document.getElementById("face-json-output");
+
+  if (qrDetectBtn) {
+    qrDetectBtn.addEventListener("click", async () => {
+      if (!canvasPreview || canvasPreview.width === 0) {
+        showStatus("Please capture canvas first.", "error");
+        return;
+      }
+
+      const stats = CanvasProcessor.inspectCanvas(canvasPreview);
+      if (!stats.hasData) {
+        showStatus("Warning: Canvas is empty.", "error");
+        return;
+      }
+
+      showStatus("Running Dedicated YOLO QR Code Detector (ONNX WebGPU/WASM)...", "info");
+      qrDetectBtn.disabled = true;
+
+      try {
+        const QR_CONFIDENCE_THRESHOLD = 0.50;
+        const result = await QRDetectorModule.detectQRCodes(canvasPreview, QR_CONFIDENCE_THRESHOLD, 0.45);
+        const { detections, metrics } = result;
+
+        console.log("=== DEDICATED YOLO QR CODE DETECTIONS ===", result);
+
+        if (qrCount) qrCount.textContent = detections.length;
+        if (qrJsonOutput) qrJsonOutput.textContent = JSON.stringify(detections, null, 2);
+        if (qrDebugContainer) qrDebugContainer.classList.remove("hidden");
+
+        if (detections.length === 0) {
+          showStatus(`QR Code detection complete in ${metrics.totalTimeMs}ms (${metrics.executionProvider}). No QR codes detected.`, "info");
+        } else {
+          // Draw visual bounding box & confidence overlay
+          CanvasProcessor.drawDebugOverlays(canvasPreview, detections, "QR CODE");
+
+          showStatus(`QR Code detection complete in ${metrics.totalTimeMs}ms! (${metrics.executionProvider}, Final: ${detections.length} QR code(s) detected)`, "info");
+        }
+
+        // Standardized output format for Privacy Gate Integration
+        currentJsonData = {
+          qrDetector: "Dedicated YOLO QR-Code Detector (YOLOv8n-QR)",
+          confidenceThreshold: QR_CONFIDENCE_THRESHOLD,
+          modelMeta: QRDetectorModule.getModelMetadata(),
+          metrics: metrics,
+          detections: detections
+        };
+        if (outputTitle) outputTitle.textContent = `QR Code Detection Results (${detections.length} QR codes detected)`;
+        if (jsonOutput) jsonOutput.textContent = JSON.stringify(currentJsonData, null, 2);
+        if (copyBtn) copyBtn.disabled = false;
+      } catch (err) {
+        console.error("[QR Detection Error]", err);
+        showStatus("QR Detection Error: " + (err?.message || String(err)), "error");
+      } finally {
+        qrDetectBtn.disabled = false;
+      }
+    });
+  }
+
+  if (yoloFaceBtn) {
+    yoloFaceBtn.addEventListener("click", async () => {
+      if (!canvasPreview || canvasPreview.width === 0) {
+        showStatus("Please capture canvas first.", "error");
+        return;
+      }
+
+      const stats = CanvasProcessor.inspectCanvas(canvasPreview);
+      if (!stats.hasData) {
+        showStatus("Warning: Canvas is empty.", "error");
+        return;
+      }
+
+      showStatus("Running Pretrained YOLO Face Detector (ONNX WebGPU/WASM)...", "info");
+      yoloFaceBtn.disabled = true;
+
+      try {
+        // Run experimental YOLO face detection pipeline
+        const result = await YOLOFaceDetectorModule.detectFaces(canvasPreview, 0.45, 0.45);
+        const { detections, metrics } = result;
+
+        console.log("=== EXPERIMENTAL YOLO FACE DETECTIONS ===", result);
+
+        // Render debug JSON
+        if (faceCount) faceCount.textContent = detections.length;
+        if (faceJsonOutput) faceJsonOutput.textContent = JSON.stringify(detections, null, 2);
+        if (faceDebugContainer) faceDebugContainer.classList.remove("hidden");
+
+        if (detections.length === 0) {
+          showStatus(`YOLO Face detection complete in ${metrics.totalTimeMs}ms (${metrics.executionProvider}). No human faces detected.`, "info");
+        } else {
+          // Draw non-destructive outline debug boxes ONLY (No black redaction masks, No "[REDACTED]")
+          CanvasProcessor.drawDebugOverlays(canvasPreview, detections, "YOLO FACE");
+
+          showStatus(`YOLO Face detection complete in ${metrics.totalTimeMs}ms! (${metrics.executionProvider}, Preprocess: ${metrics.preprocessTimeMs}ms, Inference: ${metrics.inferenceTimeMs}ms, Postprocess: ${metrics.postprocessTimeMs}ms, Final: ${metrics.finalDetectionsCount})`, "info");
+        }
+
+        currentJsonData = {
+          faceDetector: "Pretrained YOLO Nano Face Detector (YOLOv8n-Face)",
+          modelMeta: YOLOFaceDetectorModule.getModelMetadata(),
+          diagnosticFlow: {
+            step1_modelVerified: "YES (Ultralytics YOLOv8n-face trained on WIDER FACE, 1 class: face)",
+            step2_sessionInitialized: `YES (Execution provider: ${metrics.executionProvider})`,
+            step3_inputPreprocessing: {
+              originalCanvasResolution: metrics.canvasResolution,
+              yoloInputResolution: "640 x 640 px",
+              colorspace: "RGB",
+              normalization: "[0.0, 1.0]",
+              tensorLayout: "Float32 [1, 3, 640, 640] NCHW"
+            },
+            step5_rawOutputTensor: {
+              shape: result.rawStats ? result.rawStats.dims : [1, 5, 8400],
+              numAnchors: result.rawStats ? result.rawStats.numAnchors : 8400,
+              maxRawConfidence: metrics.maxRawConfidence,
+              minRawConfidence: metrics.minRawConfidence,
+              topPredictions: result.rawStats ? result.rawStats.top10 : []
+            },
+            step6_stageCountsBreakdown: {
+              rawPredictionsTotal: metrics.rawPredictionsTotal,
+              candidatesAbove001LowDiagnosticThresh: metrics.candidatesAbove001,
+              candidatesAboveConfThresh: metrics.candidatesAboveConfThresh,
+              candidatesBeforeNMS: result.candidatesBeforeNMS ? result.candidatesBeforeNMS.length : metrics.candidatesAboveConfThresh,
+              candidatesAfterNMS_Final: metrics.finalDetectionsCount
+            }
+          },
+          metrics: metrics,
+          faces: detections
+        };
+        if (outputTitle) outputTitle.textContent = `YOLO Face Detection Results (${detections.length} faces detected)`;
+        if (jsonOutput) jsonOutput.textContent = JSON.stringify(currentJsonData, null, 2);
+        if (copyBtn) copyBtn.disabled = false;
+      } catch (err) {
+        console.error("[YOLO Face Detection Error]", err);
+        showStatus("YOLO Face Detection Error: " + (err?.message || String(err)), "error");
+      } finally {
+        yoloFaceBtn.disabled = false;
+      }
+    });
+  }
+
+
 
   if (ocrBtn) {
     ocrBtn.addEventListener("click", async () => {

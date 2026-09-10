@@ -127,6 +127,116 @@ class CanvasProcessor {
   static getImageData(ctx, width, height) {
     return ctx.getImageData(0, 0, width, height);
   }
+
+  /**
+   * Maps bounding box coordinates between source and target pixel dimension systems.
+   * @param {{ x: number, y: number, width: number, height: number }} bbox
+   * @param {{ width: number, height: number }} sourceDim
+   * @param {{ width: number, height: number }} targetDim
+   * @returns {{ x: number, y: number, width: number, height: number }}
+   */
+  static mapBoxCoordinates(bbox, sourceDim, targetDim) {
+    if (!sourceDim || !targetDim || (sourceDim.width === targetDim.width && sourceDim.height === targetDim.height)) {
+      return { ...bbox };
+    }
+    const scaleX = targetDim.width / sourceDim.width;
+    const scaleY = targetDim.height / sourceDim.height;
+
+    return {
+      x: Math.round(bbox.x * scaleX),
+      y: Math.round(bbox.y * scaleY),
+      width: Math.round(bbox.width * scaleX),
+      height: Math.round(bbox.height * scaleY)
+    };
+  }
+
+  /**
+   * Adds configurable padding (e.g. 15%) around a bounding box and clamps to canvas bounds.
+   * @param {{ x: number, y: number, width: number, height: number }} bbox
+   * @param {number} [paddingPercent=0.15]
+   * @param {{ width: number, height: number }} canvasDim
+   * @returns {{ x: number, y: number, width: number, height: number }}
+   */
+  static applyBoundingBoxPadding(bbox, paddingPercent = 0.15, canvasDim) {
+    const padX = Math.round(bbox.width * paddingPercent);
+    const padY = Math.round(bbox.height * paddingPercent);
+
+    const x = Math.max(0, bbox.x - padX);
+    const y = Math.max(0, bbox.y - padY);
+
+    const maxW = canvasDim ? canvasDim.width : x + bbox.width + padX * 2;
+    const maxH = canvasDim ? canvasDim.height : y + bbox.height + padY * 2;
+
+    const width = Math.min(maxW - x, bbox.width + (padX * 2));
+    const height = Math.min(maxH - y, bbox.height + (padY * 2));
+
+    return { x, y, width, height };
+  }
+
+  /**
+   * Draws non-destructive debug visualization overlays on a canvas for testing (Chunk 7).
+   * @param {HTMLCanvasElement} canvas
+   * @param {Array<{ type: string, x: number, y: number, width: number, height: number, confidence: number }>} detections
+   * @param {string} [labelPrefix="Face"]
+   */
+  static drawDebugOverlays(canvas, detections, labelPrefix = "FACE") {
+    if (!canvas || !detections || detections.length === 0) return;
+    const ctx = canvas.getContext("2d");
+
+    ctx.save();
+    for (const det of detections) {
+      const box = det.bbox || det;
+      // Draw bright green bounding box outline ONLY (no black redaction masks)
+      ctx.strokeStyle = "#00FF66";
+      ctx.lineWidth = Math.max(2, Math.round(canvas.width / 400));
+      ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+      // Label banner: FACE confidence: 0.94
+      const text = `${labelPrefix} confidence: ${det.confidence.toFixed(2)}`;
+      ctx.font = `bold ${Math.max(12, Math.round(canvas.width / 50))}px sans-serif`;
+      const textWidth = ctx.measureText(text).width;
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+      ctx.fillRect(box.x, Math.max(0, box.y - 24), textWidth + 12, 24);
+
+      ctx.fillStyle = "#00FF66";
+      ctx.fillText(text, box.x + 6, Math.max(16, box.y - 8));
+    }
+    ctx.restore();
+  }
+
+
+
+  /**
+   * Applies privacy mask / redaction overlay over specified bounding box regions (Chunk 8).
+   * @param {HTMLCanvasElement} canvas
+   * @param {Array<{ x: number, y: number, width: number, height: number }>} regions
+   * @param {Object} [options={}] - Options (paddingPercent: 0.15, fillColor: "#000000")
+   */
+  static applyRedactionMask(canvas, regions, options = {}) {
+    if (!canvas || !regions || regions.length === 0) return;
+    const ctx = canvas.getContext("2d");
+    const paddingPercent = typeof options.paddingPercent === "number" ? options.paddingPercent : 0.15;
+    const fillColor = options.fillColor || "#000000";
+
+    const canvasDim = { width: canvas.width, height: canvas.height };
+
+    ctx.save();
+    for (const item of regions) {
+      const region = item.bbox || item;
+      const padded = this.applyBoundingBoxPadding(region, paddingPercent, canvasDim);
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(padded.x, padded.y, padded.width, padded.height);
+
+      // Add clear warning icon/text pattern on redaction mask
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = `bold ${Math.max(10, Math.round(padded.height / 5))}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("[REDACTED QR]", padded.x + padded.width / 2, padded.y + padded.height / 2);
+    }
+    ctx.restore();
+  }
 }
 
 // Global exposure for scripts

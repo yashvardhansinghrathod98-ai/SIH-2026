@@ -5,13 +5,17 @@ const PIIType = Object.freeze({
   PASSWORD: "PASSWORD",
   EMAIL: "EMAIL",
   PHONE: "PHONE",
-  CARD: "CARD"
+  CARD: "CARD",
+  QR_CODE: "QR_code",
+  SIGNATURE: "signature"
 });
 
 const PIISource = Object.freeze({
   DOM: "DOM",
   DOM_TEXT: "DOM_TEXT",
-  OCR: "OCR"
+  OCR: "OCR",
+  QR_YOLO: "QR_YOLO",
+  COMBINED_YOLO: "COMBINED_YOLO"
 });
 
 /**

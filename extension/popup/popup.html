@@ -17,6 +17,8 @@
       <button id="inspect-btn" class="primary-btn">Inspect DOM</button>
       <button id="capture-btn" class="secondary-btn">Capture Canvas</button>
       <button id="ocr-btn" class="secondary-btn" disabled>Run Local OCR</button>
+      <button id="qr-detect-btn" class="secondary-btn" disabled style="background-color: #0284c7; color: #ffffff;">Detect QR Codes</button>
+      <button id="yolo-face-btn" class="secondary-btn" disabled style="background-color: #4f46e5; color: #ffffff;">YOLO Face Test</button>
       <button id="synthetic-ocr-btn" class="secondary-btn">Test Synthetic OCR</button>
     </div>
 
@@ -55,6 +57,26 @@
       </div>
       <div class="preview-box">
         <canvas id="canvas-preview"></canvas>
+      </div>
+    </div>
+
+    <!-- Section: QR Code Detections & Privacy Redaction -->
+    <div id="qr-debug-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>DEDICATED QR CODE DETECTIONS (<span id="qr-count">0</span> QR codes detected)</span>
+      </div>
+      <div class="json-container">
+        <pre id="qr-json-output">// QR Code Detection Results</pre>
+      </div>
+    </div>
+
+    <!-- Section: Face Detections & Privacy Redaction -->
+    <div id="face-debug-container" class="pii-debug-container hidden">
+      <div class="json-header">
+        <span>HUMAN FACE DETECTIONS (<span id="face-count">0</span> faces detected)</span>
+      </div>
+      <div class="json-container">
+        <pre id="face-json-output">// Face Detection Results</pre>
       </div>
     </div>
 
@@ -97,8 +119,11 @@
   </div>
 
   <script src="../lib/tesseract.min.js"></script>
+  <script src="../lib/onnx/ort.all.min.js"></script>
   <script src="../perception/canvas-processor.js"></script>
   <script src="../perception/ocr-engine.js"></script>
+  <script src="../perception/qr-detector.js"></script>
+  <script src="../perception/yolo-face-detector.js"></script>
   <script src="../privacy/pii-detector/pii-types.js"></script>
   <script src="../privacy/pii-detector/text-detector.js"></script>
   <script src="../privacy/pii-detector/dom-detector.js"></script>
